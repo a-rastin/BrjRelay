@@ -352,6 +352,40 @@ CLIENT  INFO    ready: local SOCKS5 is listening on 127.0.0.1:1080
 
 ---
 
+## راه‌اندازی macOS
+
+همان باینری `goose-client` که در Linux استفاده می‌شود، با یک نکتهٔ خاص macOS (قرنطینهٔ Gatekeeper). معماری درست را انتخاب کنید: **Apple Silicon (M1/M2/M3/M4)** → `darwin-arm64`؛ **Intel Mac** → `darwin-amd64`.
+
+**۱. دانلود و اکسترکت:**
+```bash
+cd ~/Downloads   # یا هر پوشه‌ای که می‌خواهید
+tar -xzf GooseRelayVPN-client-v1.6.0-darwin-arm64.tar.gz
+cd GooseRelayVPN-client-v1.6.0-darwin-arm64/
+```
+
+**۲. پاک کردن پرچم قرنطینهٔ Gatekeeper.** macOS برای هر باینری دانلود شده `com.apple.quarantine` می‌گذارد؛ اگر این مرحله را رد کنید، اولین اجرا با خطای «Apple cannot check it for malicious software» fail می‌شود:
+```bash
+xattr -d com.apple.quarantine goose-client 2>/dev/null || true
+chmod +x goose-client
+```
+
+**۳. ساخت فایل config:**
+```bash
+cp client_config.example.json client_config.json
+open -e client_config.json   # در TextEdit باز می‌شود
+```
+`script_keys` (شناسهٔ deployment) و `tunnel_key` را پر کنید، سیو کنید، ببندید.
+
+**۴. اجرای کلاینت:**
+```bash
+./goose-client
+```
+وقتی پیام `ready: local SOCKS5 is listening on 127.0.0.1:1080` را دیدید کار می‌کند. پنجرهٔ Terminal را باز نگه دارید.
+
+> ⚠️ اگر خطای `cannot execute binary file: Exec format error` دیدید، معماری اشتباه را دانلود کرده‌اید. Apple Silicon به `darwin-arm64` نیاز دارد؛ Macهای Intel قدیمی به `darwin-amd64`.
+
+---
+
 ## راه‌اندازی اندروید (Termux)
 
 کلاینت اندروید داخل [Termux](https://termux.dev) اجرا می‌شود — فایل APK وجود ندارد. مراحل زیر را دنبال کنید:

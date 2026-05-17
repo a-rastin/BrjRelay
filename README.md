@@ -350,6 +350,40 @@ Now set your browser to use SOCKS5 proxy `127.0.0.1:1080`:
 
 ---
 
+## macOS Setup
+
+The same `goose-client` binary as Linux, with one macOS-specific quirk (Gatekeeper quarantine). Pick the right architecture: **Apple Silicon (M1/M2/M3/M4)** → `darwin-arm64`; **Intel Mac** → `darwin-amd64`.
+
+**1. Download and extract:**
+```bash
+cd ~/Downloads   # or wherever you want it
+tar -xzf GooseRelayVPN-client-v1.6.0-darwin-arm64.tar.gz
+cd GooseRelayVPN-client-v1.6.0-darwin-arm64/
+```
+
+**2. Clear the Gatekeeper quarantine flag.** macOS marks every downloaded binary with `com.apple.quarantine`; if you skip this, the first run fails with "Apple cannot check it for malicious software":
+```bash
+xattr -d com.apple.quarantine goose-client 2>/dev/null || true
+chmod +x goose-client
+```
+
+**3. Create your config:**
+```bash
+cp client_config.example.json client_config.json
+open -e client_config.json   # opens in TextEdit
+```
+Fill in your `script_keys` (deployment ID) and `tunnel_key`, save, close.
+
+**4. Run the client:**
+```bash
+./goose-client
+```
+When you see `ready: local SOCKS5 is listening on 127.0.0.1:1080` it's working. Leave the Terminal window open.
+
+> ⚠️ If you get `cannot execute binary file: Exec format error`, you downloaded the wrong architecture. Apple Silicon needs `darwin-arm64`; older Intel Macs need `darwin-amd64`.
+
+---
+
 ## Android Setup (Termux)
 
 The Android client runs inside [Termux](https://termux.dev) — there is no APK. Follow these steps:
