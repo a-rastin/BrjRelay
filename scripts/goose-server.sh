@@ -189,11 +189,32 @@ install_or_update() {
 
     # 4. Download and Install Binary
     PLATFORM=$(get_platform)
-    DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/GooseRelayVPN-server-$LATEST_VERSION-$PLATFORM.tar.gz"
+    TARBALL_NAME="GooseRelayVPN-server-$LATEST_VERSION-$PLATFORM.tar.gz"
+    DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/$TARBALL_NAME"
+    SUMS_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/SHA256SUMS.txt"
     echo -e "${YELLOW}Downloading $LATEST_VERSION for $PLATFORM...${NC}"
-    curl -L "$DOWNLOAD_URL" -o "/tmp/goose.tar.gz"
+    curl -fL "$DOWNLOAD_URL" -o "/tmp/goose.tar.gz"
+    curl -fLs "$SUMS_URL" -o "/tmp/goose.sums.txt"
+
+    echo -e "${YELLOW}Verifying checksum...${NC}"
+    EXPECTED=$(awk -v f="$TARBALL_NAME" '{sub(/^\.\//,"",$2)} $2==f {print $1}' "/tmp/goose.sums.txt")
+    ACTUAL=$(sha256sum "/tmp/goose.tar.gz" | awk '{print $1}')
+    if [ -z "$EXPECTED" ]; then
+        echo -e "${RED}Could not find $TARBALL_NAME in SHA256SUMS.txt — aborting${NC}"
+        rm -f /tmp/goose.tar.gz /tmp/goose.sums.txt
+        exit 1
+    fi
+    if [ "$EXPECTED" != "$ACTUAL" ]; then
+        echo -e "${RED}Checksum mismatch for $TARBALL_NAME${NC}"
+        echo -e "${RED}  expected: $EXPECTED${NC}"
+        echo -e "${RED}  actual:   $ACTUAL${NC}"
+        rm -f /tmp/goose.tar.gz /tmp/goose.sums.txt
+        exit 1
+    fi
+    echo -e "${GREEN}Checksum OK${NC}"
+
     tar -xzf "/tmp/goose.tar.gz" -C "$INSTALL_DIR"
-    rm "/tmp/goose.tar.gz"
+    rm /tmp/goose.tar.gz /tmp/goose.sums.txt
     echo "$LATEST_VERSION" > "$INSTALL_DIR/.version"
 
     if [ ! -f "$INSTALL_DIR/$BINARY_NAME" ]; then
