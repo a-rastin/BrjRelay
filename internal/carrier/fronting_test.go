@@ -66,10 +66,13 @@ func TestValidateFrontedProbeResponse(t *testing.T) {
 		body       []byte
 		wantErr    bool
 	}{
-		{name: "ok", statusCode: http.StatusOK, body: []byte(frontedProbeOKBody), wantErr: false},
-		{name: "ok trimmed", statusCode: http.StatusOK, body: []byte("  " + frontedProbeOKBody + "\n"), wantErr: false},
+		{name: "legacy text ok", statusCode: http.StatusOK, body: []byte(frontedProbeLegacyOKBody), wantErr: false},
+		{name: "legacy text trimmed", statusCode: http.StatusOK, body: []byte("  " + frontedProbeLegacyOKBody + "\n"), wantErr: false},
+		{name: "modern json ok", statusCode: http.StatusOK, body: []byte(`{"ok":true,"date":"2026-05-12","count":1315,"version":1,"protocol":1}`), wantErr: false},
+		{name: "json ok minimal", statusCode: http.StatusOK, body: []byte(`{"ok":true}`), wantErr: false},
+		{name: "json ok false", statusCode: http.StatusOK, body: []byte(`{"ok":false}`), wantErr: true},
 		{name: "quota page", statusCode: http.StatusOK, body: []byte("<html>quota exceeded</html>"), wantErr: true},
-		{name: "status fail", statusCode: http.StatusTooManyRequests, body: []byte(frontedProbeOKBody), wantErr: true},
+		{name: "status fail", statusCode: http.StatusTooManyRequests, body: []byte(frontedProbeLegacyOKBody), wantErr: true},
 	}
 
 	for _, tc := range tests {

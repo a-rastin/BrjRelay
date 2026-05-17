@@ -7,6 +7,7 @@ package carrier
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -19,7 +20,11 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const frontedProbeOKBody = "GooseRelay forwarder OK"
+// frontedProbeLegacyOKBody is what apps_script/Code.gs returned from doGet
+// before v1.4. Modern deployments return JSON instead (see
+// frontedProbeOKJSON); both are accepted to stay compatible with users who
+// haven't redeployed Code.gs in a while.
+const frontedProbeLegacyOKBody = "GooseRelay forwarder OK"
 
 // FrontingConfig describes how to reach script.google.com without revealing
 // the real Host to a passive on-path observer: dial GoogleIP, do a TLS
@@ -176,10 +181,21 @@ func validateFrontedProbeResponse(statusCode int, body []byte) error {
 	if statusCode != http.StatusOK {
 		return fmt.Errorf("unexpected probe status %d", statusCode)
 	}
-	if strings.TrimSpace(string(body)) != frontedProbeOKBody {
-		return fmt.Errorf("unexpected probe body %q", strings.TrimSpace(string(body)))
+	trimmed := strings.TrimSpace(string(body))
+	// Modern Code.gs (>=v1.4) returns JSON like
+	// {"ok":true,"date":"2026-05-12","count":1315,"version":1,"protocol":1}.
+	// Legacy deployments still return the plain "GooseRelay forwarder OK"
+	// string; accept both so an out-of-date Code.gs doesn't trip the probe.
+	if trimmed == frontedProbeLegacyOKBody {
+		return nil
 	}
-	return nil
+	var jsonBody struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &jsonBody); err == nil && jsonBody.OK {
+		return nil
+	}
+	return fmt.Errorf("unexpected probe body %q", trimmed)
 }
 
 func selectFrontedClientIndexes(results []frontedProbeResult) []int {
