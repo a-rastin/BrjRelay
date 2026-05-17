@@ -86,17 +86,12 @@ func (c *Crypto) Open(envelope []byte) ([]byte, error) {
 // are never delivered to a different client polling the same server.
 const ClientIDLen = 16
 
-// batchPool reuses the marshaled-slice scratch and the plaintext header
-// buffer across EncodeBatch calls. Without pooling, each batch allocates two
-// fresh buffers (the plain header + the marshaled-frame slice header), which
-// is meaningful at our drain rate (≤ every 350 ms per worker, 3 workers).
+// encPlainPool reuses the plaintext scratch buffer across EncodeBatch calls.
+// Frames are appended directly into this buffer via Frame.AppendMarshal, so
+// there's no per-frame intermediate allocation.
 var (
 	encPlainPool = sync.Pool{New: func() interface{} {
 		buf := make([]byte, 0, 64*1024)
-		return &buf
-	}}
-	encMarshaledPool = sync.Pool{New: func() interface{} {
-		buf := make([][]byte, 0, 32)
 		return &buf
 	}}
 	// zstdEncPool and zstdDecPool are used by EncodeBatch/DecodeBatch.
@@ -154,26 +149,11 @@ func EncodeBatch(c *Crypto, clientID [ClientIDLen]byte, frames []*Frame) ([]byte
 		return nil, fmt.Errorf("batch: too many frames: %d", len(frames))
 	}
 
-	// Marshal all frames first so we know the exact plaintext size.
-	marshaledP := encMarshaledPool.Get().(*[][]byte)
-	marshaled := (*marshaledP)[:0]
-	defer func() {
-		for i := range marshaled {
-			marshaled[i] = nil
-		}
-		marshaled = marshaled[:0]
-		*marshaledP = marshaled
-		encMarshaledPool.Put(marshaledP)
-	}()
-
+	// Compute the exact plaintext size up front so the pooled buffer can be
+	// grown once and frames appended directly into it (no per-frame alloc).
 	plainSize := 1 + ClientIDLen + 2 // flags byte + client_id + u16 frame count
 	for _, f := range frames {
-		raw, err := f.Marshal()
-		if err != nil {
-			return nil, fmt.Errorf("batch: marshal frame: %w", err)
-		}
-		marshaled = append(marshaled, raw)
-		plainSize += 4 + len(raw) // u32 length prefix + frame bytes
+		plainSize += 4 + f.EncodedLen() // u32 length prefix + frame bytes
 	}
 
 	// Pull a plaintext scratch buffer from the pool; grow if needed.
@@ -193,10 +173,14 @@ func EncodeBatch(c *Crypto, clientID [ClientIDLen]byte, frames []*Frame) ([]byte
 	plain = append(plain, 0x00) // flags placeholder at index 0
 	plain = append(plain, clientID[:]...)
 	plain = append(plain, byte(len(frames)>>8), byte(len(frames)))
-	for _, raw := range marshaled {
-		plain = append(plain,
-			byte(len(raw)>>24), byte(len(raw)>>16), byte(len(raw)>>8), byte(len(raw)))
-		plain = append(plain, raw...)
+	for _, f := range frames {
+		n := f.EncodedLen()
+		plain = append(plain, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+		var err error
+		plain, err = f.AppendMarshal(plain)
+		if err != nil {
+			return nil, fmt.Errorf("batch: marshal frame: %w", err)
+		}
 	}
 
 	// Attempt Zstandard compression on the payload section (everything after
