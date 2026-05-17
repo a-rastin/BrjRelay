@@ -191,3 +191,75 @@ func TestOnTx_FiresOnEnqueue(t *testing.T) {
 		t.Fatal("OnTx not invoked")
 	}
 }
+
+// TestRollbackDrain_RestoresSYNAndPayload: when a drained batch cannot be
+// transmitted, RollbackDrain must restore the session so that the next drain
+// produces an equivalent set of frames. Previously, batch-send failures
+// silently dropped the SYN+payload, leaving the session zombied for the rest
+// of its lifetime.
+func TestRollbackDrain_RestoresSYNAndPayload(t *testing.T) {
+	s := New(sid(8), "example.com:80", true)
+	s.EnqueueTx([]byte("hello"))
+
+	first, snap := s.DrainTxLimitedTxn(64*1024, 0)
+	if len(first) != 1 || !first[0].HasFlag(frame.FlagSYN) {
+		t.Fatalf("first drain: want one SYN frame, got %#v", first)
+	}
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot when frames were drained")
+	}
+
+	// Without rollback, a second drain would yield nothing — that's the bug.
+	emptyFrames, _ := s.DrainTxLimitedTxn(64*1024, 0)
+	if len(emptyFrames) != 0 {
+		t.Fatalf("post-drain: want 0 frames, got %d (pre-existing test invariant broken)", len(emptyFrames))
+	}
+
+	s.RollbackDrain(snap)
+
+	again, _ := s.DrainTxLimitedTxn(64*1024, 0)
+	if len(again) != 1 {
+		t.Fatalf("after rollback: want one frame again, got %d", len(again))
+	}
+	if !again[0].HasFlag(frame.FlagSYN) {
+		t.Fatal("after rollback: regenerated frame must carry SYN")
+	}
+	if !bytes.Equal(again[0].Payload, []byte("hello")) {
+		t.Fatalf("after rollback: payload corruption — got %q want %q", again[0].Payload, "hello")
+	}
+	if again[0].Seq != first[0].Seq {
+		t.Fatalf("after rollback: seq must be reused for retransmission. got %d want %d",
+			again[0].Seq, first[0].Seq)
+	}
+}
+
+// TestRollbackDrain_PreservesConcurrentEnqueue: if EnqueueTx happens between
+// a drain and its rollback (the realistic case where new SOCKS data arrives
+// while a batch is in flight), the rolled-back data goes first and the new
+// data follows.
+func TestRollbackDrain_PreservesConcurrentEnqueue(t *testing.T) {
+	s := New(sid(9), "example.com:80", true)
+	s.EnqueueTx([]byte("first"))
+
+	_, snap := s.DrainTxLimitedTxn(64*1024, 0)
+
+	// Simulate user code writing more bytes while the previous batch is in
+	// flight. This is the normal case — EnqueueTx is unblocked by the txCond
+	// broadcast inside drainTx.
+	s.EnqueueTx([]byte("second"))
+
+	s.RollbackDrain(snap)
+
+	after, _ := s.DrainTxLimitedTxn(64*1024, 0)
+	if len(after) == 0 {
+		t.Fatal("want at least one frame after rollback")
+	}
+	var got []byte
+	for _, f := range after {
+		got = append(got, f.Payload...)
+	}
+	want := []byte("firstsecond")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("merged payload: got %q want %q", got, want)
+	}
+}

@@ -468,10 +468,20 @@ func idleBackoff(n int) time.Duration {
 // response frames back to their sessions. Returns true if any work was done
 // (frames sent or received) so the Run loop can decide whether to sleep.
 func (c *Client) pollOnce(ctx context.Context) bool {
-	frames, drainedIDs := c.drainAll()
+	frames, drainedIDs, snaps := c.drainAll()
 	if len(drainedIDs) > 0 {
 		defer c.releaseInFlight(drainedIDs)
 	}
+	// rollbackPending: set to false on success paths (batch delivered to the
+	// exit server, response received) so snapshots are discarded. Stays true
+	// on every other return path so unsent frames are restored to their
+	// sessions and resent on the next poll cycle.
+	rollbackPending := len(snaps) > 0
+	defer func() {
+		if rollbackPending {
+			c.rollbackDrained(snaps)
+		}
+	}()
 	isIdlePoll := len(frames) == 0
 	if isIdlePoll {
 		// Allow idleSlotsPerBucket idle long-poll slots per *account bucket* so
@@ -583,6 +593,7 @@ func (c *Client) pollOnce(ctx context.Context) bool {
 		if resp.StatusCode == http.StatusNoContent || len(respBody) == 0 {
 			c.markEndpointSuccess(endpointIdx)
 			pollOK = true
+			rollbackPending = false // batch delivered; server returned no body
 			countFrameBytes(&c.stats.framesOut, &c.stats.bytesOut, frames)
 			return len(frames) > 0
 		}
@@ -619,6 +630,7 @@ func (c *Client) pollOnce(ctx context.Context) bool {
 				continue
 			}
 			log.Printf("[carrier] relay response too large via %s (%d bytes > %d); dropping batch to protect stability", shortScriptKey(scriptURL), len(respBody), maxRelayResponseBodyBytes)
+			rollbackPending = false // request reached the server; we just can't ingest the response
 			return len(frames) > 0
 		}
 		if isLikelyNonBatchRelayPayload(respBody) {
@@ -648,6 +660,7 @@ func (c *Client) pollOnce(ctx context.Context) bool {
 				continue
 			}
 			log.Printf("[carrier] relay response was invalid via %s (possibly HTML/error page instead of encrypted data): %v", shortScriptKey(scriptURL), decodeErr)
+			rollbackPending = false // Apps Script returned a normal-looking 200; the exit server most likely processed the batch even though we can't ingest the response
 			return len(frames) > 0
 		}
 
@@ -656,6 +669,7 @@ func (c *Client) pollOnce(ctx context.Context) bool {
 		}
 		c.markEndpointSuccess(endpointIdx)
 		pollOK = true
+		rollbackPending = false // batch delivered, response decoded
 		countFrameBytes(&c.stats.framesOut, &c.stats.bytesOut, frames)
 		countFrameBytes(&c.stats.framesIn, &c.stats.bytesIn, rxFrames)
 		if c.debugTiming {
@@ -823,11 +837,12 @@ func endpointBlacklistTTL(failCount int) time.Duration {
 	}
 }
 
-func (c *Client) drainAll() ([]*frame.Frame, [][frame.SessionIDLen]byte) {
+func (c *Client) drainAll() ([]*frame.Frame, [][frame.SessionIDLen]byte, map[[frame.SessionIDLen]byte]*session.DrainSnapshot) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []*frame.Frame
 	var drainedIDs [][frame.SessionIDLen]byte
+	snaps := map[[frame.SessionIDLen]byte]*session.DrainSnapshot{}
 	batchCap := maxDrainFramesPerBatch
 	if len(c.sessions) >= busySessionThreshold {
 		batchCap = maxDrainFramesPerBatchBusy
@@ -870,13 +885,16 @@ func (c *Client) drainAll() ([]*frame.Frame, [][frame.SessionIDLen]byte) {
 		if remaining < perSessionCap {
 			perSessionCap = remaining
 		}
-		frames := s.DrainTxLimited(MaxFramePayload, perSessionCap)
+		frames, snap := s.DrainTxLimitedTxn(MaxFramePayload, perSessionCap)
 		delete(c.txReady, id) // remove now; OnTx re-adds if more data arrives
 		if len(frames) == 0 {
 			return
 		}
 		c.inFlight[id] = true
 		drainedIDs = append(drainedIDs, id)
+		if snap != nil {
+			snaps[id] = snap
+		}
 		out = append(out, frames...)
 		remaining -= len(frames)
 	}
@@ -891,7 +909,32 @@ func (c *Client) drainAll() ([]*frame.Frame, [][frame.SessionIDLen]byte) {
 	for _, r := range refs {
 		drain(r.id, false)
 	}
-	return out, drainedIDs
+	return out, drainedIDs, snaps
+}
+
+// rollbackDrained restores every session named in snaps to its pre-drain
+// state. Used on failure paths where the batch never reached the exit server
+// (transport error, Apps Script rejection, etc.) so the SYN/payload can be
+// retransmitted on the next poll instead of being silently lost.
+func (c *Client) rollbackDrained(snaps map[[frame.SessionIDLen]byte]*session.DrainSnapshot) {
+	if len(snaps) == 0 {
+		return
+	}
+	c.mu.Lock()
+	type pending struct {
+		s    *session.Session
+		snap *session.DrainSnapshot
+	}
+	out := make([]pending, 0, len(snaps))
+	for id, snap := range snaps {
+		if s, ok := c.sessions[id]; ok {
+			out = append(out, pending{s: s, snap: snap})
+		}
+	}
+	c.mu.Unlock()
+	for _, p := range out {
+		p.s.RollbackDrain(p.snap)
+	}
 }
 
 func (c *Client) releaseInFlight(ids [][frame.SessionIDLen]byte) {

@@ -238,25 +238,64 @@ func (s *Session) IsDone() bool {
 	return false
 }
 
+// DrainSnapshot captures the pre-drain state of a session so the caller can
+// roll back via RollbackDrain if the batch carrying the drained frames cannot
+// be transmitted. The snapshot is opaque to callers.
+type DrainSnapshot struct {
+	synNeeded     bool
+	txBuf         []byte
+	txSeq         uint64
+	finSent       bool
+	finSentAt     time.Time
+	firstQueuedAt time.Time
+}
+
 // DrainTx removes pending tx bytes and returns them as a sequence of frames,
 // each capped at maxPayload bytes. Emits a SYN frame first if needed, and a
 // trailing FIN frame if RequestClose was called and the FIN hasn't been sent yet.
 func (s *Session) DrainTx(maxPayload int) []*frame.Frame {
-	return s.drainTx(maxPayload, 0)
+	frames, _ := s.drainTx(maxPayload, 0, false)
+	return frames
 }
 
 // DrainTxLimited is like DrainTx but emits at most maxFrames frames in one
 // call (0 means unlimited). Remaining bytes stay queued for later polls.
 func (s *Session) DrainTxLimited(maxPayload, maxFrames int) []*frame.Frame {
-	return s.drainTx(maxPayload, maxFrames)
+	frames, _ := s.drainTx(maxPayload, maxFrames, false)
+	return frames
 }
 
-func (s *Session) drainTx(maxPayload, maxFrames int) []*frame.Frame {
+// DrainTxLimitedTxn is like DrainTxLimited but also returns a snapshot of the
+// pre-drain state. If the caller cannot transmit the returned frames (HTTP
+// error, decode failure, classified quota response, etc.), pass the snapshot
+// to RollbackDrain to restore the session. If the transmission succeeds, the
+// snapshot is discarded — the drained state is already applied.
+//
+// Any data enqueued via EnqueueTx between this call and a RollbackDrain is
+// preserved; rollback restores the unsent prefix and then keeps the new data
+// after it.
+func (s *Session) DrainTxLimitedTxn(maxPayload, maxFrames int) ([]*frame.Frame, *DrainSnapshot) {
+	return s.drainTx(maxPayload, maxFrames, true)
+}
+
+func (s *Session) drainTx(maxPayload, maxFrames int, withSnapshot bool) ([]*frame.Frame, *DrainSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var snap *DrainSnapshot
+	if withSnapshot {
+		snap = &DrainSnapshot{
+			synNeeded:     s.synNeeded,
+			txBuf:         s.txBuf,
+			txSeq:         s.txSeq,
+			finSent:       s.finSent,
+			finSentAt:     s.finSentAt,
+			firstQueuedAt: s.firstQueuedAt,
+		}
+	}
+
 	if !s.synNeeded && len(s.txBuf) == 0 && !(s.closeReq && !s.finSent) {
-		return nil
+		return nil, nil
 	}
 
 	// Estimate capacity up front to avoid repeated slice growth under large
@@ -352,7 +391,55 @@ func (s *Session) drainTx(maxPayload, maxFrames int) []*frame.Frame {
 	}
 
 	s.txCond.Broadcast() // wake any backpressured writers
-	return frames
+	if len(frames) == 0 {
+		// No frames produced — caller has nothing to roll back.
+		snap = nil
+	}
+	return frames, snap
+}
+
+// RollbackDrain restores the session to the state captured in snap, undoing a
+// previous DrainTxLimitedTxn whose frames could not be transmitted. Any data
+// enqueued in the meantime is preserved (appended after the restored bytes).
+// Calling with a nil snapshot is a no-op.
+func (s *Session) RollbackDrain(snap *DrainSnapshot) {
+	if snap == nil {
+		return
+	}
+	s.mu.Lock()
+	// Merge: snapshot bytes (drained but unsent) first, then any new bytes
+	// queued during the in-flight window.
+	if len(snap.txBuf) > 0 {
+		if len(s.txBuf) == 0 {
+			s.txBuf = snap.txBuf
+		} else {
+			merged := make([]byte, 0, len(snap.txBuf)+len(s.txBuf))
+			merged = append(merged, snap.txBuf...)
+			merged = append(merged, s.txBuf...)
+			s.txBuf = merged
+		}
+	}
+	if snap.synNeeded {
+		s.synNeeded = true
+	}
+	// txSeq must reset so retransmitted frames carry the same seq numbers the
+	// server would have seen on the first (lost) attempt.
+	s.txSeq = snap.txSeq
+	if !snap.finSent {
+		s.finSent = false
+		s.finSentAt = time.Time{}
+	}
+	if !snap.firstQueuedAt.IsZero() {
+		if s.firstQueuedAt.IsZero() || snap.firstQueuedAt.Before(s.firstQueuedAt) {
+			s.firstQueuedAt = snap.firstQueuedAt
+		}
+	}
+	cb := s.OnTx
+	s.txCond.Broadcast()
+	s.mu.Unlock()
+	if cb != nil {
+		cb()
+	}
 }
 
 // ProcessRx enqueues f to the per-session rxLoop goroutine. The fast path is
