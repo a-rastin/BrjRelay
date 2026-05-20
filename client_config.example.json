@@ -4,12 +4,11 @@
   "socks_port": 1080,
   "google_host": "216.239.38.120",
   "sni": ["www.google.com", "mail.google.com", "accounts.google.com"],
+  "_comment_script_keys": "Add more entries here for extra deployments/accounts, e.g. {\"id\":\"AKfycb...\",\"account\":\"acct-b\"}. Deployments with the same account label share one Apps Script daily quota bucket.",
   "script_keys": [
-    {"id": "REPLACE_WITH_DEPLOYMENT_ID", "account": "acct-a"},
-    {"id": "OPTIONAL_SECOND_DEPLOYMENT_ID", "account": "acct-a"},
-    {"id": "OPTIONAL_THIRD_DEPLOYMENT_ID", "account": "acct-b"}
+    {"id": "REPLACE_WITH_DEPLOYMENT_ID", "account": "acct-a"}
   ],
-  "tunnel_key": "REPLACE_WITH_OUTPUT_OF_scripts_gen-key.sh",
+  "tunnel_key": "REPLACE_WITH_64_HEX_CHARACTER_RANDOM_KEY",
 
   "_comment_socks_auth": "Optional: require SOCKS5 username/password (RFC 1929). Both fields must be set together or both omitted.",
   "socks_user": "",
