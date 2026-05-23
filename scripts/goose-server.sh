@@ -131,8 +131,14 @@ get_platform() {
 # Function to install/update the server
 install_or_update() {
     local is_update=$1
+    # Resolve dependencies first: get_latest_version (and the config-writing
+    # block further down) shells out to jq, so on a fresh VPS without jq
+    # pre-installed the script would otherwise die on line 56 with
+    # "jq: command not found" before ever reaching its own dependency
+    # installer. Fixes #148.
+    check_dependencies
     discover_existing
-    
+
     LATEST_VERSION=$(get_latest_version)
     
     if [ -n "$EXISTING_BIN" ]; then
@@ -158,8 +164,6 @@ install_or_update() {
         echo -e "${YELLOW}Installing GooseRelayVPN $LATEST_VERSION...${NC}"
     fi
 
-    check_dependencies
-    
     # 1. Shutdown if running
     echo -e "${YELLOW}Stopping service...${NC}"
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
