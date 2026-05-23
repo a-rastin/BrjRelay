@@ -327,9 +327,17 @@ C:\nssm\win64\nssm.exe remove GooseRelayVPN confirm
 
 ### Step 9: Run the client on your computer
 
+**Linux/macOS:**
 ```bash
 ./goose-client -config client_config.json
 ```
+
+**Windows (cmd.exe or PowerShell):**
+```cmd
+.\goose-client.exe -config client_config.json
+```
+
+> Use the backslash form (`.\…`). The Unix-style `./goose-client.exe` does not work in `cmd.exe` — it tries to run a command literally named `.` and prints `'.' is not recognized as an internal or external command`.
 
 You should see output like this:
 

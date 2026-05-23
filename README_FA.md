@@ -329,9 +329,17 @@ C:\nssm\win64\nssm.exe remove GooseRelayVPN confirm
 
 ### مرحله ۹: اجرای کلاینت روی کامپیوتر
 
+**Linux/macOS:**
 ```bash
 ./goose-client -config client_config.json
 ```
+
+**Windows (cmd.exe یا PowerShell):**
+```cmd
+.\goose-client.exe -config client_config.json
+```
+
+> از فرم بک‌اسلش (`.\…`) استفاده کنید. سینتکس یونیکسی `./goose-client.exe` در `cmd.exe` کار نمی‌کند — cmd عبارت `.` را به‌عنوان نام دستور تفسیر می‌کند و خطای `'.' is not recognized as an internal or external command` می‌دهد.
 
 باید خروجی‌ای شبیه این ببینید:
 
