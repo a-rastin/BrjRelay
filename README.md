@@ -483,7 +483,8 @@ What the client does for you automatically:
 | `tunnel_key` | — | 64-char hex AES-256 key. Must match the server byte-for-byte. |
 | `socks_user` | *(optional)* | SOCKS5 username (RFC 1929). When set, clients must authenticate or the connection is rejected. Must be paired with `socks_pass` — set both or neither. |
 | `socks_pass` | *(optional)* | SOCKS5 password paired with `socks_user`. |
-| `coalesce_step_ms` | `0` (off) | Adaptive uplink coalescing. Set it to a positive number to make the first kick of a burst of TX operations wait a little for more operations; each new operation resets the timer. This trades a bit of latency for fewer Apps Script calls. A good starting range is 20-40 ms. Set it to `0` to turn coalescing off. The internal safety cap is derived automatically from this value. |
+| `coalesce_step_ms` | `25` | Adaptive uplink coalescing wait per TX op. The first kick of a burst arms a `step` ms timer; each new kick within the window resets it, bounded by `coalesce_max_ms` from the first kick. Set to `-1` to disable coalescing entirely. Lower values reduce latency; higher values reduce Apps Script calls. Range: 10–80 ms typical. |
+| `coalesce_max_ms`  | `50` | Hard upper bound on how long the first kick of a burst can be delayed before the carrier wakes. Must be `>= coalesce_step_ms`. |
 | `idle_slots_per_bucket` | `2` | Download-throughput tuning. The carrier holds this many concurrent idle long-polls open per account bucket to receive downstream pushes. Default `2` is the best balance for accounts with 2+ deployments (the recommended configuration). Lower to `1` if each Google account has only one deployment. Raise to `3` for accounts with 3+ deployments. Max `3`; values above are rejected. |
 
 ### Server (`server_config.json`)
