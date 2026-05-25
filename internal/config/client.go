@@ -385,13 +385,45 @@ func LoadClient(path string) (*Client, error) {
 		return nil, fmt.Errorf("socks_user and socks_pass must both be set or both be empty in %s", path)
 	}
 
-	if f.CoalesceStepMs < 0 {
-		return nil, fmt.Errorf("coalesce_step_ms must be >= 0 in %s (got %d)", path, f.CoalesceStepMs)
-	}
-	coalesceMax := 0
-	if f.CoalesceStepMs > 0 {
-		coalesceMax = f.CoalesceStepMs * 25
-	}
+	const (
+    defaultCoalesceStepMs = 25
+    defaultCoalesceMaxMs  = 50
+)
+
+// Resolve coalesce_step_ms.
+//   -1     → disabled (opt-out)
+//    0/unset → default (25 ms)
+//   >0     → user value
+coalesceStep := f.CoalesceStepMs
+switch {
+case coalesceStep < -1:
+    return nil, fmt.Errorf("coalesce_step_ms must be -1 (disabled), 0 (default), or a positive number in %s (got %d)", path, coalesceStep)
+case coalesceStep == 0:
+    coalesceStep = defaultCoalesceStepMs
+}
+
+// Resolve coalesce_max_ms.
+//    0/unset → default when step > 0, else 0
+//   >0      → user value (must be >= step)
+coalesceMax := f.CoalesceMaxMs
+switch {
+case coalesceMax < 0:
+    return nil, fmt.Errorf("coalesce_max_ms must be >= 0 in %s (got %d)", path, coalesceMax)
+case coalesceStep <= 0:
+    coalesceMax = 0 // disabled — both must be zero for the carrier to skip coalescing
+case coalesceMax == 0:
+    coalesceMax = defaultCoalesceMaxMs
+    if coalesceMax < coalesceStep {
+        coalesceMax = coalesceStep * 2 // user raised step but didn't set max
+    }
+case coalesceMax < coalesceStep:
+    return nil, fmt.Errorf("coalesce_max_ms (%d) must be >= coalesce_step_ms (%d) in %s", coalesceMax, coalesceStep, path)
+}
+
+// Map the disabled sentinel to what the carrier expects.
+if coalesceStep < 0 {
+    coalesceStep = 0
+}
 
 	if f.IdleSlotsPerBucket < 0 || f.IdleSlotsPerBucket > 3 {
 		return nil, fmt.Errorf("idle_slots_per_bucket must be 0–3 in %s (got %d). 0 or unset = default (2); lower to 1 if your accounts have only one deployment each and you see issue #56-style 429s; raise to 3 for accounts with 3+ deployments", path, f.IdleSlotsPerBucket)
@@ -408,7 +440,7 @@ func LoadClient(path string) (*Client, error) {
 		DebugTiming:                 f.DebugTiming,
 		SocksUser:                   socksUser,
 		SocksPass:                   socksPass,
-		CoalesceStepMs:              f.CoalesceStepMs,
+		CoalesceStepMs:              coalesceStep,
 		CoalesceMaxMs:               coalesceMax,
 		IdleSlotsPerBucket:          f.IdleSlotsPerBucket,
 	}
