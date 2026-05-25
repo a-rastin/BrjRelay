@@ -1,4 +1,4 @@
-# GooseRelayVPN
+# BrjRelay
 
 [![GitHub](https://img.shields.io/badge/GitHub-GooseRelayVPN-blue?logo=github)](https://github.com/kianmhz/GooseRelayVPN)
 
@@ -14,14 +14,7 @@ A SOCKS5 VPN that tunnels **raw TCP** through a Google Apps Script web app to yo
 
 If you like this project, please consider starring it on GitHub (⭐). It helps the project get discovered.
 
-You can also support the project financially:
 
-- TRX / USDT TRC20:
-  `TSxg2WAXYnkoR2UiUTzCxbmqNARAt91aqB`
-- BNB / USDT BEP20:
-  `0xe7b48d8fd5fbbb4e3fa9a06723a62a88585139ea`
-- TON:
-  `UQDBzJqzJ5e7uZFPrmarTRSGGbD1UoFK2q5_jWh4D2nnNdUB`
 
 ## Important Notes
 
