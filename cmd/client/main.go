@@ -176,8 +176,9 @@ func main() {
 		log.Printf("[client] debug_timing enabled — per-session TTFB and per-poll RTT will be logged")
 	}
 	if cfg.CoalesceStepMs > 0 {
-		log.Printf("[client] uplink coalescing: step=%dms (internal safety cap %dms; bursts of TX collapse into a single poll)", cfg.CoalesceStepMs, cfg.CoalesceMaxMs)
-	}
+    log.Printf("[client] uplink coalescing: step=%dms max=%dms (TX bursts collapse into a single poll; set coalesce_step_ms=-1 to disable)",
+        cfg.CoalesceStepMs, cfg.CoalesceMaxMs)
+}
 	carr, err := carrier.New(carrier.Config{
 		ScriptURLs:         cfg.ScriptURLs,
 		ScriptAccounts:     cfg.ScriptAccounts,
