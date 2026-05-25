@@ -192,11 +192,13 @@ type Config struct {
 	DebugTiming bool   // when true, log per-session TTFB and per-poll Apps Script RTT
 
 	// CoalesceStep / CoalesceMax enable adaptive uplink coalescing on kick().
-	// When CoalesceStep > 0 the first kick of a burst arms a step timer; each
-	// subsequent kick within the window resets it, bounded by CoalesceMax from
-	// the first kick. Bursts collapse into a single wake. Both 0 = disabled.
-	CoalesceStep time.Duration
-	CoalesceMax  time.Duration
+    // When CoalesceStep > 0 the first kick of a burst arms a step timer; each
+    // subsequent kick within the window resets it, bounded by CoalesceMax from
+    // the first kick. Bursts collapse into a single wake. Both 0 = disabled.
+    // The config layer enables coalescing by default (step=25, max=50); pass
+    // coalesce_step_ms=-1 in client_config.json to opt out.
+    CoalesceStep time.Duration
+    CoalesceMax  time.Duration
 
 	// IdleSlotsPerBucket is the number of concurrent idle long-polls allowed
 	// per account bucket. <= 0 means default (1). Validated and capped at 3
